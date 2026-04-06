@@ -108,7 +108,7 @@ interface User {
 // --- Auth Screen ---
 function AuthScreen({ onAuth }: { onAuth: (user: User) => void }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -117,48 +117,47 @@ function AuthScreen({ onAuth }: { onAuth: (user: User) => void }) {
 
   const handle = async () => {
     setError('');
-    const u = username.trim().toLowerCase();
+    const e = email.trim().toLowerCase();
     const p = password.trim();
-    if (!u || !p) { setError('Fill in all fields.'); return; }
+    if (!e || !p) { setError('Fill in all fields.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { setError('Enter a valid email address.'); return; }
 
-    // Use username as email prefix for Supabase (username@cricpro.app)
-    const email = `${u}@cricpro.app`;
     setLoading(true);
-
     try {
       if (mode === 'signup') {
-        const dn = displayName.trim() || u;
-        if (p.length < 4) { setError('Password must be at least 4 characters.'); setLoading(false); return; }
+        const dn = displayName.trim() || e.split('@')[0];
+        const uname = e.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (p.length < 6) { setError('Password must be at least 6 characters.'); setLoading(false); return; }
 
-        const { data, error: signUpError } = await supabase.auth.signUp({ email, password: p });
+        const { data, error: signUpError } = await supabase.auth.signUp({ email: e, password: p });
         if (signUpError) { setError(signUpError.message); setLoading(false); return; }
         if (!data.user) { setError('Sign up failed. Try again.'); setLoading(false); return; }
 
         // Create profile row
         const { error: profileError } = await supabase.from('profiles').insert({
           id: data.user.id,
-          username: u,
+          username: uname,
           display_name: dn,
         });
         if (profileError && profileError.code !== '23505') {
           setError(profileError.message); setLoading(false); return;
         }
 
-        onAuth({ id: data.user.id, username: u, displayName: dn });
+        onAuth({ id: data.user.id, username: uname, displayName: dn });
       } else {
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password: p });
-        if (signInError) { setError('Wrong username or password.'); setLoading(false); return; }
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email: e, password: p });
+        if (signInError) { setError('Wrong email or password.'); setLoading(false); return; }
         if (!data.user) { setError('Sign in failed.'); setLoading(false); return; }
 
         // Fetch profile
         const { data: profile } = await supabase.from('profiles').select('username, display_name').eq('id', data.user.id).single();
-        const resolvedUsername = profile?.username ?? u;
-        const resolvedDisplay = profile?.display_name ?? u;
+        const resolvedUsername = profile?.username ?? e.split('@')[0];
+        const resolvedDisplay = profile?.display_name ?? resolvedUsername;
 
         onAuth({ id: data.user.id, username: resolvedUsername, displayName: resolvedDisplay });
       }
-    } catch (e: any) {
-      setError(e.message || 'Something went wrong.');
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong.');
     } finally {
       setLoading(false);
     }
@@ -200,9 +199,9 @@ function AuthScreen({ onAuth }: { onAuth: (user: User) => void }) {
             </div>
           )}
           <div>
-            <label className="text-[10px] font-black text-black uppercase tracking-widest mb-1.5 block">Username</label>
-            <input value={username} onChange={e => setUsername(e.target.value)}
-              placeholder="e.g. ravi123"
+            <label className="text-[10px] font-black text-black uppercase tracking-widest mb-1.5 block">Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              placeholder="e.g. ravi@gmail.com"
               className="w-full px-4 py-3 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green transition-all" />
           </div>
           <div>
@@ -316,8 +315,11 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
 
   // Track the current active match ID in Supabase
   const [activeMatchId, setActiveMatchId] = useLocalStorage<string | null>(k('activeMatchId'), null);
+  // 4-digit share code for the active match
+  const [activeShareCode, setActiveShareCode] = useLocalStorage<string | null>(k('activeShareCode'), null);
   // Whether the current user is the creator of the active match (can edit/score)
   const [isMatchOwner, setIsMatchOwner] = useState(true);
+  const [copied, setCopied] = useState(false);
   // Watch match ID input (for spectating someone else's match)
   const [watchMatchId, setWatchMatchId] = useState('');
   const [watchError, setWatchError] = useState('');
@@ -349,14 +351,17 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
   }, [user.id]);
 
   // Join a live match as spectator
-  const watchLiveMatch = async (matchId: string) => {
+  const watchLiveMatch = async (code: string) => {
     setWatchError('');
+    const trimmed = code.trim();
+    if (!/^\d{4}$/.test(trimmed)) { setWatchError('Enter a valid 4-digit code.'); return; }
+
     const { data, error } = await supabase
       .from('matches')
       .select('*')
-      .eq('id', matchId.trim())
+      .eq('share_code', trimmed)
       .single();
-    if (error || !data) { setWatchError('Match not found. Check the ID.'); return; }
+    if (error || !data) { setWatchError('Match not found. Check the code.'); return; }
 
     // Load match state into local state
     setMatchConfig(prev => ({
@@ -376,6 +381,7 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
     setCurrentBowler(data.current_bowler);
     setMatchStats(data.match_stats);
     setActiveMatchId(data.id);
+    setActiveShareCode(data.share_code);
     setIsMatchOwner(data.created_by === user.id);
     setCurrentView('live-scoring');
   };
@@ -953,6 +959,7 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
     setMatchStats({});
     setShowMatchOverModal(false);
     setActiveMatchId(null);
+    setActiveShareCode(null);
     setIsMatchOwner(true);
     setScore({ runs: 0, wickets: 0, balls: 0, battingTeam: 'A', battedPlayers: [], partnership: { runs: 0, balls: 0 }, innings: 1, firstInningsScore: null });
     setBatsmen({ onStrike: { name: '', runs: 0, balls: 0 }, nonStriker: { name: '', runs: 0, balls: 0 } });
@@ -1045,8 +1052,9 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
               <Eye className="w-4 h-4 text-sports-blue" /> Watch a Live Match
             </div>
             <div className="flex gap-2">
-              <input value={watchMatchId} onChange={e => setWatchMatchId(e.target.value)}
-                placeholder="Paste match ID..."
+              <input value={watchMatchId} onChange={e => setWatchMatchId(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                placeholder="Enter 4-digit code..."
+                maxLength={4}
                 className="flex-1 px-3 py-2 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-xs outline-none focus:border-sports-green transition-all" />
               <button onClick={() => watchLiveMatch(watchMatchId)}
                 className="px-4 py-2 bg-sports-blue text-white rounded-xl font-black text-xs hover:bg-sports-green transition-all">
@@ -1098,8 +1106,9 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
           {/* Watch a live match */}
           <div className="mt-4 flex gap-2 items-center">
             <Eye className="w-4 h-4 text-sports-blue shrink-0" />
-            <input value={watchMatchId} onChange={e => setWatchMatchId(e.target.value)}
-              placeholder="Watch live match — paste match ID..."
+            <input value={watchMatchId} onChange={e => setWatchMatchId(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              placeholder="Enter 4-digit code..."
+              maxLength={4}
               className="flex-1 px-3 py-2 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-xs outline-none focus:border-sports-green transition-all max-w-xs" />
             <button onClick={() => watchLiveMatch(watchMatchId)}
               className="px-4 py-2 bg-sports-blue text-white rounded-xl font-black text-xs hover:bg-sports-green transition-all">
@@ -1711,9 +1720,10 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
                   players_b: finalPlayersB,
                   toss: matchConfig.toss,
                   status: 'setup',
-                }).select('id').single();
+                }).select('id, share_code').single();
                 if (newMatch?.id) {
                   setActiveMatchId(newMatch.id);
+                  setActiveShareCode(newMatch.share_code ?? null);
                   setIsMatchOwner(true);
                 }
 
@@ -1736,6 +1746,12 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
     const ballsLeft = Math.max(0, matchConfig.overs * 6 - score.balls);
     const target = score.innings === 2 && score.firstInningsScore ? score.firstInningsScore.runs + 1 : null;
     const need = target ? Math.max(0, target - score.runs) : null;
+    const copyMatchId = () => {
+      if (!activeShareCode) return;
+      navigator.clipboard.writeText(activeShareCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
 
     return (
       <div className="max-w-5xl mx-auto space-y-3 pb-6">
@@ -1743,6 +1759,21 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
         {!isMatchOwner && (
           <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-300 rounded-xl text-xs font-black text-blue-700 uppercase tracking-widest">
             <Eye className="w-4 h-4" strokeWidth={3} /> Spectator Mode — you can watch but not score this match
+          </div>
+        )}
+
+        {/* Share panel for match owner */}
+        {isMatchOwner && activeMatchId && (
+          <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border border-blue-300 rounded-xl">
+            <Eye className="w-4 h-4 text-blue-600 shrink-0" strokeWidth={3} />
+            <div className="flex-1 min-w-0">
+              <span className="text-[10px] font-black text-blue-700 uppercase tracking-widest block">Share this code with spectators</span>
+              <span className="text-4xl font-black text-blue-900 tracking-[0.3em]">{activeShareCode ?? '----'}</span>
+            </div>
+            <button onClick={copyMatchId}
+              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-black transition-all border ${copied ? 'bg-green-100 border-green-400 text-green-700' : 'bg-white border-blue-300 text-blue-700 hover:bg-blue-100'}`}>
+              {copied ? '✓ Copied!' : 'Copy'}
+            </button>
           </div>
         )}
         <AnimatePresence>
@@ -1765,13 +1796,6 @@ function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-black">{matchConfig.overs} ov match</span>
-            {isMatchOwner && activeMatchId && (
-              <button onClick={() => { navigator.clipboard.writeText(activeMatchId); }}
-                title="Copy match ID to share with spectators"
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-lg text-xs font-black text-blue-700 transition-all">
-                <Eye className="w-3 h-3" strokeWidth={3} /> Share
-              </button>
-            )}
             <button onClick={undoLastAction} disabled={matchHistoryStack.length === 0 || !isMatchOwner}
               className="flex items-center gap-1 px-3 py-1.5 bg-green-100 hover:bg-green-200 border border-green-300 rounded-lg text-xs font-black text-black transition-all disabled:opacity-40">
               <Undo2 className="w-3 h-3" strokeWidth={3} /> Undo

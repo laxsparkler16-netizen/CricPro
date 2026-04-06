@@ -14,6 +14,7 @@ create table if not exists public.profiles (
 -- Matches table
 create table if not exists public.matches (
   id uuid default gen_random_uuid() primary key,
+  share_code char(4) unique not null default lpad(floor(random() * 10000)::text, 4, '0'),
   created_by uuid references auth.users(id) on delete cascade not null,
   team_a text not null default 'Team A',
   team_b text not null default 'Team B',
@@ -74,3 +75,6 @@ $$;
 create trigger matches_updated_at
   before update on public.matches
   for each row execute function public.handle_updated_at();
+
+-- Index for fast share_code lookups
+create index if not exists matches_share_code_idx on public.matches(share_code);
