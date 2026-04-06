@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "Space Grotesk", monospace;
+  
+  --color-sports-bg: #f0fdf4;
+  --color-sports-card: #ffffff;
+  --color-sports-blue: #15803d; /* Dark Green */
+  --color-sports-green: #16a34a; /* Medium Green */
+  --color-sports-yellow: #22c55e; /* Light Green */
+  --color-sports-red: #059669;
+  --color-sports-text: #000000;
+  --color-sports-text-dim: #000000;
+
+  /* Fluid Typography */
+  --text-xs: clamp(0.65rem, 0.6rem + 0.25vw, 0.75rem);
+  --text-sm: clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  --text-base: clamp(0.875rem, 0.8rem + 0.3vw, 1rem);
+  --text-lg: clamp(1rem, 0.9rem + 0.4vw, 1.125rem);
+  --text-xl: clamp(1.125rem, 1rem + 0.5vw, 1.25rem);
+  --text-2xl: clamp(1.25rem, 1.1rem + 0.6vw, 1.5rem);
+  --text-3xl: clamp(1.5rem, 1.3rem + 0.8vw, 1.875rem);
+  --text-4xl: clamp(1.875rem, 1.6rem + 1vw, 2.25rem);
+  --text-5xl: clamp(2.25rem, 2rem + 1.2vw, 3rem);
+  --text-6xl: clamp(3rem, 2.5rem + 1.5vw, 3.75rem);
+
+  /* Fluid Spacing */
+  --space-1: clamp(0.25rem, 0.2rem + 0.2vw, 0.375rem);
+  --space-2: clamp(0.5rem, 0.4rem + 0.4vw, 0.75rem);
+  --space-3: clamp(0.75rem, 0.6rem + 0.6vw, 1rem);
+  --space-4: clamp(1rem, 0.8rem + 0.8vw, 1.5rem);
+  --space-6: clamp(1.5rem, 1.2rem + 1.2vw, 2.25rem);
+  --space-8: clamp(2rem, 1.6rem + 1.6vw, 3rem);
+  --space-12: clamp(3rem, 2.4rem + 2.4vw, 4.5rem);
+}
+
+@layer base {
+  html {
+    font-size: 16px;
+  }
+  body {
+    @apply font-sans bg-sports-bg text-black font-bold;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(22, 163, 74, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(34, 197, 94, 0.1) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-display tracking-tight text-black font-black;
+    text-shadow: 0 0 20px rgba(22, 163, 74, 0.1);
+  }
+}
+
+@layer utilities {
+  .text-fluid-xs { font-size: var(--text-xs); }
+  .text-fluid-sm { font-size: var(--text-sm); }
+  .text-fluid-base { font-size: var(--text-base); }
+  .text-fluid-lg { font-size: var(--text-lg); }
+  .text-fluid-xl { font-size: var(--text-xl); }
+  .text-fluid-2xl { font-size: var(--text-2xl); }
+  .text-fluid-3xl { font-size: var(--text-3xl); }
+  .text-fluid-4xl { font-size: var(--text-4xl); }
+  .text-fluid-5xl { font-size: var(--text-5xl); }
+  .text-fluid-6xl { font-size: var(--text-6xl); }
+
+  .p-fluid-1 { padding: var(--space-1); }
+  .p-fluid-2 { padding: var(--space-2); }
+  .p-fluid-3 { padding: var(--space-3); }
+  .p-fluid-4 { padding: var(--space-4); }
+  .p-fluid-6 { padding: var(--space-6); }
+  .p-fluid-8 { padding: var(--space-8); }
+
+  .gap-fluid-1 { gap: var(--space-1); }
+  .gap-fluid-2 { gap: var(--space-2); }
+  .gap-fluid-3 { gap: var(--space-3); }
+  .gap-fluid-4 { gap: var(--space-4); }
+  .gap-fluid-6 { gap: var(--space-6); }
+}
+
+@layer components {
+  .sports-card {
+    @apply bg-sports-card/95 backdrop-blur-md border border-green-200 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.08)] transition-all duration-500 hover:border-sports-green/60 hover:shadow-[0_4px_16px_rgba(22,163,74,0.15)];
+  }
+  
+  .glow-purple {
+    @apply shadow-[0_0_15px_rgba(22,163,74,0.4)];
+  }
+  
+  .glow-cyan {
+    @apply shadow-[0_0_15px_rgba(22,163,74,0.4)];
+  }
+
+  .glow-pink {
+    @apply shadow-[0_0_15px_rgba(34,197,94,0.4)];
+  }
+
+  .glow-red {
+    @apply shadow-[0_0_15px_rgba(5,150,105,0.4)];
+  }
+
+  .glow-orange {
+    @apply shadow-[0_0_15px_rgba(22,163,74,0.4)];
+  }
+
+  .glow-yellow {
+    @apply shadow-[0_0_15px_rgba(34,197,94,0.4)];
+  }
+
+  .glow-green {
+    @apply shadow-[0_0_15px_rgba(22,163,74,0.4)];
+  }
+
+  .glow-blue {
+    @apply shadow-[0_0_15px_rgba(22,163,74,0.4)];
+  }
+
+  .glow-indigo {
+    @apply shadow-[0_0_15px_rgba(22,163,74,0.4)];
+  }
+  
+  .live-indicator {
+    @apply flex items-center gap-1.5 px-2 py-0.5 rounded bg-sports-red text-[10px] font-black text-white uppercase tracking-wider animate-pulse shadow-[0_0_10px_rgba(5,150,105,0.5)];
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-green-300 rounded-full hover:bg-green-400;
+  }
+}
