@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Trophy,
   Settings2,
@@ -28,9 +28,16 @@ import {
   CheckCircle2,
   Plus,
   Bot,
-  Play
+  Play,
+  LogIn,
+  UserPlus,
+  LogOut,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from './supabaseClient';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 // --- Types ---
 type View = 'dashboard' | 'match-setup' | 'openers-selection' | 'live-scoring' | 'match-history' | 'roster' | 'settings';
@@ -91,16 +98,297 @@ const Badge = ({ children, variant, className = "" }: { children: React.ReactNod
   );
 };
 
+// --- Auth Types ---
+interface User {
+  id: string;        // Supabase auth UUID
+  username: string;
+  displayName: string;
+}
+
+// --- Auth Screen ---
+function AuthScreen({ onAuth }: { onAuth: (user: User) => void }) {
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handle = async () => {
+    setError('');
+    const u = username.trim().toLowerCase();
+    const p = password.trim();
+    if (!u || !p) { setError('Fill in all fields.'); return; }
+
+    // Use username as email prefix for Supabase (username@cricpro.app)
+    const email = `${u}@cricpro.app`;
+    setLoading(true);
+
+    try {
+      if (mode === 'signup') {
+        const dn = displayName.trim() || u;
+        if (p.length < 4) { setError('Password must be at least 4 characters.'); setLoading(false); return; }
+
+        const { data, error: signUpError } = await supabase.auth.signUp({ email, password: p });
+        if (signUpError) { setError(signUpError.message); setLoading(false); return; }
+        if (!data.user) { setError('Sign up failed. Try again.'); setLoading(false); return; }
+
+        // Create profile row
+        const { error: profileError } = await supabase.from('profiles').insert({
+          id: data.user.id,
+          username: u,
+          display_name: dn,
+        });
+        if (profileError && profileError.code !== '23505') {
+          setError(profileError.message); setLoading(false); return;
+        }
+
+        onAuth({ id: data.user.id, username: u, displayName: dn });
+      } else {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password: p });
+        if (signInError) { setError('Wrong username or password.'); setLoading(false); return; }
+        if (!data.user) { setError('Sign in failed.'); setLoading(false); return; }
+
+        // Fetch profile
+        const { data: profile } = await supabase.from('profiles').select('username, display_name').eq('id', data.user.id).single();
+        const resolvedUsername = profile?.username ?? u;
+        const resolvedDisplay = profile?.display_name ?? u;
+
+        onAuth({ id: data.user.id, username: resolvedUsername, displayName: resolvedDisplay });
+      }
+    } catch (e: any) {
+      setError(e.message || 'Something went wrong.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-sports-bg flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 30, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="w-full max-w-sm"
+      >
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-gradient-to-br from-sports-blue to-sports-green rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-[0_0_40px_rgba(22,163,74,0.3)]">
+            <CircleDot className="w-10 h-10 text-white" strokeWidth={3} />
+          </div>
+          <h1 className="text-3xl font-black text-black tracking-tighter">CRIC<span className="text-sports-green">PRO</span></h1>
+          <p className="text-sm text-black font-medium mt-1">Your personal cricket scorer</p>
+        </div>
+
+        {/* Tab toggle */}
+        <div className="flex bg-green-100 rounded-2xl p-1 mb-6 border border-green-200">
+          {(['signin', 'signup'] as const).map(m => (
+            <button key={m} onClick={() => { setMode(m); setError(''); }}
+              className={`flex-1 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-sports-green text-white shadow-md' : 'text-black hover:text-sports-green'}`}>
+              {m === 'signin' ? 'Sign In' : 'Sign Up'}
+            </button>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-green-200 p-6 shadow-[0_4px_20px_rgba(22,163,74,0.1)] space-y-4">
+          {mode === 'signup' && (
+            <div>
+              <label className="text-[10px] font-black text-black uppercase tracking-widest mb-1.5 block">Display Name</label>
+              <input value={displayName} onChange={e => setDisplayName(e.target.value)}
+                placeholder="e.g. Ravi Kumar"
+                className="w-full px-4 py-3 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green transition-all" />
+            </div>
+          )}
+          <div>
+            <label className="text-[10px] font-black text-black uppercase tracking-widest mb-1.5 block">Username</label>
+            <input value={username} onChange={e => setUsername(e.target.value)}
+              placeholder="e.g. ravi123"
+              className="w-full px-4 py-3 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green transition-all" />
+          </div>
+          <div>
+            <label className="text-[10px] font-black text-black uppercase tracking-widest mb-1.5 block">Password</label>
+            <div className="relative">
+              <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handle()}
+                placeholder="••••••••"
+                className="w-full px-4 py-3 pr-12 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green transition-all" />
+              <button onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-black hover:text-sports-green transition-colors">
+                {showPw ? <EyeOff className="w-4 h-4" strokeWidth={3} /> : <Eye className="w-4 h-4" strokeWidth={3} />}
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
+              className="px-4 py-2.5 bg-red-50 border border-red-300 rounded-xl text-xs font-bold text-red-700">
+              {error}
+            </motion.div>
+          )}
+
+          <button onClick={handle} disabled={loading}
+            className="w-full py-3.5 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-sm hover:bg-sports-blue transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95 disabled:opacity-60">
+            {loading ? 'Please wait...' : mode === 'signin' ? <><LogIn className="w-4 h-4" strokeWidth={3} /> Sign In</> : <><UserPlus className="w-4 h-4" strokeWidth={3} /> Create Account</>}
+          </button>
+        </div>
+
+        <p className="text-center text-xs text-black font-medium mt-4">
+          {mode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
+          <button onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }}
+            className="text-sports-green font-black hover:underline">
+            {mode === 'signin' ? 'Sign Up' : 'Sign In'}
+          </button>
+        </p>
+      </motion.div>
+    </div>
+  );
+}
+
+// --- localStorage hook ---
+function useLocalStorage<T>(key: string, initial: T): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = React.useState<T>(() => {
+    try {
+      const stored = localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : initial;
+    } catch { return initial; }
+  });
+  React.useEffect(() => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  }, [key, value]);
+  return [value, setValue];
+}
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    // Restore session on mount
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('username, display_name')
+          .eq('id', session.user.id)
+          .single();
+        if (profile) {
+          setCurrentUser({ id: session.user.id, username: profile.username, displayName: profile.display_name });
+        }
+      }
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT' || !session) {
+        setCurrentUser(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setCurrentUser(null);
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-sports-bg flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-sports-blue to-sports-green rounded-2xl flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <CircleDot className="w-8 h-8 text-white" />
+          </div>
+          <p className="text-sm font-bold text-black">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthScreen onAuth={(user) => setCurrentUser(user)} />;
+  }
+
+  return <AppMain user={currentUser} onSignOut={handleSignOut} />;
+}
+
+function AppMain({ user, onSignOut }: { user: User; onSignOut: () => void }) {
+  // All keys are scoped to the user so each user has isolated data
+  const k = (key: string) => `cricpro_${user.username}_${key}`;
+
+  // Track the current active match ID in Supabase
+  const [activeMatchId, setActiveMatchId] = useLocalStorage<string | null>(k('activeMatchId'), null);
+  // Whether the current user is the creator of the active match (can edit/score)
+  const [isMatchOwner, setIsMatchOwner] = useState(true);
+  // Watch match ID input (for spectating someone else's match)
+  const [watchMatchId, setWatchMatchId] = useState('');
+  const [watchError, setWatchError] = useState('');
+
+  // Load completed match history from Supabase on mount
+  useEffect(() => {
+    supabase
+      .from('matches')
+      .select('id, team_a, team_b, score_a, wickets_a, score_b, wickets_b, man_of_match, completed_at, created_at')
+      .eq('created_by', user.id)
+      .eq('status', 'completed')
+      .order('completed_at', { ascending: false })
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          const records: MatchRecord[] = data.map(m => ({
+            id: m.id,
+            date: new Date(m.completed_at || m.created_at).toLocaleDateString(),
+            teamA: m.team_a,
+            teamB: m.team_b,
+            scoreA: m.score_a ?? 0,
+            wicketsA: m.wickets_a ?? 0,
+            scoreB: m.score_b ?? 0,
+            wicketsB: m.wickets_b ?? 0,
+            mom: m.man_of_match ?? '',
+          }));
+          setMatchHistory(records);
+        }
+      });
+  }, [user.id]);
+
+  // Join a live match as spectator
+  const watchLiveMatch = async (matchId: string) => {
+    setWatchError('');
+    const { data, error } = await supabase
+      .from('matches')
+      .select('*')
+      .eq('id', matchId.trim())
+      .single();
+    if (error || !data) { setWatchError('Match not found. Check the ID.'); return; }
+
+    // Load match state into local state
+    setMatchConfig(prev => ({
+      ...prev,
+      teamA: data.team_a,
+      teamB: data.team_b,
+      colorA: data.color_a,
+      colorB: data.color_b,
+      overs: data.overs,
+      numPlayers: data.num_players,
+      playersA: data.players_a,
+      playersB: data.players_b,
+      toss: data.toss,
+    }));
+    setScore(data.score);
+    setBatsmen(data.batsmen);
+    setCurrentBowler(data.current_bowler);
+    setMatchStats(data.match_stats);
+    setActiveMatchId(data.id);
+    setIsMatchOwner(data.created_by === user.id);
+    setCurrentView('live-scoring');
+  };
+
+  const [currentView, setCurrentView] = useLocalStorage<View>(k('view'), 'dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [historyFilter, setHistoryFilter] = useState('');
   
   // Persistent State (User Entered Data)
-  const [matchHistory, setMatchHistory] = useState<MatchRecord[]>([]);
-  const [playerStats, setPlayerStats] = useState<{name: string, runs: number, wickets: number, matches: number}[]>([]);
-  const [dismissalStats, setDismissalStats] = useState<{name: string, value: number}[]>([
+  const [matchHistory, setMatchHistory] = useLocalStorage<MatchRecord[]>(k('matchHistory'), []);
+  const [playerStats, setPlayerStats] = useLocalStorage<{name: string, runs: number, wickets: number, matches: number}[]>(k('playerStats'), []);
+  const [dismissalStats, setDismissalStats] = useLocalStorage<{name: string, value: number}[]>(k('dismissalStats'), [
     { name: 'Bowled', value: 0 },
     { name: 'Caught', value: 0 },
     { name: 'LBW', value: 0 },
@@ -108,7 +396,7 @@ export default function App() {
   ]);
 
   // Scoring State
-  const [matchConfig, setMatchConfig] = useState({ 
+  const [matchConfig, setMatchConfig] = useLocalStorage(k('matchConfig'), { 
     teamA: '', 
     teamB: '', 
     colorA: '#0ea5e9',
@@ -121,7 +409,7 @@ export default function App() {
     allPlayers: Array(22).fill(''),
     toss: { winner: null as 'Team A' | 'Team B' | null, choice: null as 'Bat' | 'Bowl' | null }
   });
-  const [score, setScore] = useState({ 
+  const [score, setScore] = useLocalStorage(k('score'), { 
     runs: 0, 
     wickets: 0, 
     balls: 0, 
@@ -133,7 +421,7 @@ export default function App() {
   });
   const [showInningsOverModal, setShowInningsOverModal] = useState(false);
   const [showMatchOverModal, setShowMatchOverModal] = useState(false);
-  const [batsmen, setBatsmen] = useState({ 
+  const [batsmen, setBatsmen] = useLocalStorage(k('batsmen'), { 
     onStrike: { name: 'Batsman 1', runs: 0, balls: 0 },
     nonStriker: { name: 'Batsman 2', runs: 0, balls: 0 }
   });
@@ -146,19 +434,19 @@ export default function App() {
   const [isTossing, setIsTossing] = useState(false);
   const [scorePopAnimation, setScorePopAnimation] = useState<{ runs: number; timestamp: number; type?: 'dot' | 'single' | 'boundary' | 'six' } | null>(null);
   const [wicketShake, setWicketShake] = useState(false);
-  const [commentary, setCommentary] = useState<{text: string, event: string, timestamp: number}[]>([]);
+  const [commentary, setCommentary] = useLocalStorage<{text: string, event: string, timestamp: number}[]>(k('commentary'), []);
   const [isGeneratingCommentary, setIsGeneratingCommentary] = useState(false);
-  const [currentBowler, setCurrentBowler] = useState({ name: 'Bowler', overs: 0, runs: 0, wickets: 0 });
-  const [activeSetupStep, setActiveSetupStep] = useState<'mode' | 'teams' | 'players' | 'toss'>('mode');
-  const [matchStats, setMatchStats] = useState<{[key: string]: {runs: number, wickets: number, bowlingRuns: number, bowlingWickets: number}}>({});
-  const [matchHistoryStack, setMatchHistoryStack] = useState<{
+  const [currentBowler, setCurrentBowler] = useLocalStorage(k('currentBowler'), { name: 'Bowler', overs: 0, runs: 0, wickets: 0 });
+  const [activeSetupStep, setActiveSetupStep] = useLocalStorage<'mode' | 'teams' | 'players' | 'toss'>(k('setupStep'), 'mode');
+  const [matchStats, setMatchStats] = useLocalStorage<{[key: string]: {runs: number, wickets: number, bowlingRuns: number, bowlingWickets: number}}>(k('matchStats'), {});
+  const [matchHistoryStack, setMatchHistoryStack] = useLocalStorage<{
     score: typeof score;
     batsmen: typeof batsmen;
     currentBowler: typeof currentBowler;
     dismissalStats: typeof dismissalStats;
     matchStats: typeof matchStats;
     isWicket: boolean;
-  }[]>([]);
+  }[]>(k('historyStack'), []);
 
   const overHistory = useMemo(() => {
     const history: { over: number, runs: number, wickets: number, totalRuns: number, totalWickets: number }[] = [];
@@ -373,6 +661,7 @@ export default function App() {
 
   const handleScoreAction = (action: string | number) => {
     if (isInningsOver) return;
+    if (!isMatchOwner) return; // only match creator can score
 
     if (typeof action === 'number') {
       saveMatchState(false);
@@ -562,47 +851,94 @@ export default function App() {
   const isTargetReached = score.innings === 2 && score.firstInningsScore && score.runs > score.firstInningsScore.runs;
   const isInningsOver = isAllOut || isOversCompleted || isTargetReached;
 
+  // Sync live score to Supabase whenever score changes (debounced via useEffect)
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!activeMatchId || !isMatchOwner) return;
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = setTimeout(() => {
+      supabase.from('matches').update({
+        score,
+        batsmen,
+        current_bowler: currentBowler,
+        match_stats: matchStats,
+        status: score.balls > 0 ? 'live' : 'setup',
+      }).eq('id', activeMatchId).then(({ error }) => {
+        if (error) console.warn('Score sync error:', error.message);
+      });
+    }, 800);
+    return () => { if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current); };
+  }, [score, batsmen, currentBowler, matchStats, activeMatchId, isMatchOwner]);
+
   const startSecondInnings = () => {
     const nextBattingTeam = score.battingTeam === 'A' ? 'B' : 'A';
-    const nextBattingPlayers = nextBattingTeam === 'A' ? matchConfig.playersA : matchConfig.playersB;
-    const nextBowlingPlayers = nextBattingTeam === 'A' ? matchConfig.playersB : matchConfig.playersA;
+    // Save first innings score, reset live state, go to openers selection
     setScore(prev => ({
       runs: 0, wickets: 0, balls: 0,
       battingTeam: nextBattingTeam,
-      battedPlayers: [nextBattingPlayers[0] || '', nextBattingPlayers[1] || ''],
+      battedPlayers: [],
       partnership: { runs: 0, balls: 0 },
       innings: 2,
       firstInningsScore: { runs: prev.runs, wickets: prev.wickets, balls: prev.balls }
     }));
-    setBatsmen({
-      onStrike: { name: nextBattingPlayers[0] || '', runs: 0, balls: 0 },
-      nonStriker: { name: nextBattingPlayers[1] || '', runs: 0, balls: 0 }
-    });
-    setCurrentBowler({ name: nextBowlingPlayers[0] || '', overs: 0, runs: 0, wickets: 0 });
+    setBatsmen({ onStrike: { name: '', runs: 0, balls: 0 }, nonStriker: { name: '', runs: 0, balls: 0 } });
+    setCurrentBowler({ name: '', overs: 0, runs: 0, wickets: 0 });
     setShowInningsOverModal(false);
     setCurrentView('openers-selection');
   };
 
-  const finishMatch = () => {
+  const finishMatch = async () => {
     const firstInningsScore = score.firstInningsScore?.runs || 0;
     const firstInningsWickets = score.firstInningsScore?.wickets || 0;
     const secondInningsScore = score.runs;
     const secondInningsWickets = score.wickets;
+    const mom = batsmen.onStrike.runs > batsmen.nonStriker.runs ? batsmen.onStrike.name : batsmen.nonStriker.name;
+    const finalScoreA = score.battingTeam === 'A' ? secondInningsScore : firstInningsScore;
+    const finalWicketsA = score.battingTeam === 'A' ? secondInningsWickets : firstInningsWickets;
+    const finalScoreB = score.battingTeam === 'B' ? secondInningsScore : firstInningsScore;
+    const finalWicketsB = score.battingTeam === 'B' ? secondInningsWickets : firstInningsWickets;
+
     const newMatch: MatchRecord = {
-      id: Date.now().toString(),
+      id: activeMatchId || Date.now().toString(),
       date: new Date().toLocaleDateString(),
       teamA: matchConfig.teamA || 'Team A',
       teamB: matchConfig.teamB || 'Team B',
-      scoreA: score.battingTeam === 'A' ? secondInningsScore : firstInningsScore,
-      wicketsA: score.battingTeam === 'A' ? secondInningsWickets : firstInningsWickets,
-      scoreB: score.battingTeam === 'B' ? secondInningsScore : firstInningsScore,
-      wicketsB: score.battingTeam === 'B' ? secondInningsWickets : firstInningsWickets,
-      mom: batsmen.onStrike.runs > batsmen.nonStriker.runs ? batsmen.onStrike.name : batsmen.nonStriker.name
+      scoreA: finalScoreA,
+      wicketsA: finalWicketsA,
+      scoreB: finalScoreB,
+      wicketsB: finalWicketsB,
+      mom,
     };
-    setMatchHistory(prev => [newMatch, ...prev]);
+    setMatchHistory(prev => [newMatch, ...prev.filter(m => m.id !== newMatch.id)]);
+
+    // Persist completed match to Supabase
+    if (activeMatchId) {
+      await supabase.from('matches').update({
+        status: 'completed',
+        score_a: finalScoreA,
+        wickets_a: finalWicketsA,
+        score_b: finalScoreB,
+        wickets_b: finalWicketsB,
+        man_of_match: mom,
+        completed_at: new Date().toISOString(),
+      }).eq('id', activeMatchId);
+    }
+
+    // Upsert player stats to Supabase
+    const statsEntries = Object.entries(matchStats);
+    for (const [name, stats] of statsEntries) {
+      const s = stats as { runs: number; wickets: number; bowlingRuns: number; bowlingWickets: number };
+      await supabase.rpc('upsert_player_stat', {
+        p_owner_id: user.id,
+        p_player_name: name,
+        p_runs: s.runs || 0,
+        p_wickets: s.bowlingWickets || 0,
+      }).then(({ error }) => { if (error) console.warn('Player stat sync:', error.message); });
+    }
+
     setPlayerStats(prev => {
       const updatedStats = [...prev];
-      Object.entries(matchStats).forEach(([name, stats]) => {
+      statsEntries.forEach(([name, stats]) => {
         const s = stats as { runs: number, wickets: number, bowlingRuns: number, bowlingWickets: number };
         const idx = updatedStats.findIndex(p => p.name === name);
         if (idx !== -1) {
@@ -613,8 +949,17 @@ export default function App() {
       });
       return updatedStats;
     });
+
     setMatchStats({});
     setShowMatchOverModal(false);
+    setActiveMatchId(null);
+    setIsMatchOwner(true);
+    setScore({ runs: 0, wickets: 0, balls: 0, battingTeam: 'A', battedPlayers: [], partnership: { runs: 0, balls: 0 }, innings: 1, firstInningsScore: null });
+    setBatsmen({ onStrike: { name: '', runs: 0, balls: 0 }, nonStriker: { name: '', runs: 0, balls: 0 } });
+    setCurrentBowler({ name: '', overs: 0, runs: 0, wickets: 0 });
+    setMatchHistoryStack([]);
+    setCommentary([]);
+    setActiveSetupStep('mode');
     setCurrentView('dashboard');
   };
 
@@ -626,9 +971,60 @@ export default function App() {
     const totalRuns = playerStats.reduce((sum, p) => sum + p.runs, 0);
     const totalWickets = playerStats.reduce((sum, p) => sum + p.wickets, 0);
 
+    const hasActiveMatch = score.balls > 0 && matchConfig.teamA !== '';
+    const activeBattingTeam = score.battingTeam === 'A' ? (matchConfig.teamA || 'Team A') : (matchConfig.teamB || 'Team B');
+    const activeBattingColor = score.battingTeam === 'A' ? matchConfig.colorA : matchConfig.colorB;
+
+    const ResumeBanner = () => hasActiveMatch ? (
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative overflow-hidden rounded-2xl border-2 border-sports-green bg-gradient-to-r from-green-50 to-white p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-[0_4px_20px_rgba(22,163,74,0.2)]"
+      >
+        {/* pulsing left bar */}
+        <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-sports-green rounded-l-2xl" />
+        <div className="flex items-center gap-4 pl-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-xs font-black text-red-600 uppercase tracking-widest">LIVE</span>
+          </div>
+          <div>
+            <div className="text-sm font-black text-black">
+              <span style={{ color: activeBattingColor }}>{activeBattingTeam}</span>
+              {' '}vs{' '}
+              <span>{score.battingTeam === 'A' ? (matchConfig.teamB || 'Team B') : (matchConfig.teamA || 'Team A')}</span>
+            </div>
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="text-lg font-black text-black">{score.runs}/{score.wickets}</span>
+              <span className="text-xs font-bold text-black">({formatOvers(score.balls)} ov)</span>
+              {score.innings === 2 && score.firstInningsScore && (
+                <span className="text-xs font-black text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full border border-orange-300">
+                  Need {Math.max(0, score.firstInningsScore.runs + 1 - score.runs)} off {Math.max(0, matchConfig.overs * 6 - score.balls)} balls
+                </span>
+              )}
+              <span className="text-xs font-bold text-black">
+                {batsmen.onStrike.name} {batsmen.onStrike.runs}({batsmen.onStrike.balls})
+              </span>
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => setCurrentView('live-scoring')}
+          className="flex items-center gap-2 px-5 py-2.5 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-xs hover:bg-sports-blue transition-all active:scale-95 shadow-lg shrink-0"
+        >
+          <Play className="w-4 h-4" strokeWidth={3} /> Resume Match
+        </button>
+      </motion.div>
+    ) : null;
+
     if (matchHistory.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[70vh] text-center px-4">
+          {hasActiveMatch && (
+            <div className="w-full max-w-2xl mb-8">
+              <ResumeBanner />
+            </div>
+          )}
           <div className="relative mb-12">
             <div className="absolute inset-0 bg-gradient-to-r from-sports-blue/20 to-sports-green/20 blur-3xl rounded-full" />
             <div className="relative w-32 h-32 rounded-3xl bg-gradient-to-br from-sports-blue to-sports-green flex items-center justify-center border-2 border-green-300 shadow-[0_0_60px_rgba(22,163,74,0.3)]">
@@ -639,9 +1035,27 @@ export default function App() {
           <p className="text-black text-base max-w-md mb-3 leading-relaxed font-medium">Professional cricket match scoring and analytics.</p>
           <p className="text-black text-sm max-w-md mb-12">Track matches, player stats, and match scores all in one place.</p>
           <button onClick={() => setCurrentView('match-setup')}
-            className="flex items-center gap-3 px-10 py-5 bg-gradient-to-r from-sports-blue via-sports-green to-sports-blue text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:shadow-[0_0_40px_rgba(22,163,74,0.4)] transition-all active:scale-95 shadow-[0_0_30px_rgba(22,163,74,0.3)] mb-16 animate-pulse">
+            className="flex items-center gap-3 px-10 py-5 bg-gradient-to-r from-sports-blue via-sports-green to-sports-blue text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:shadow-[0_0_40px_rgba(22,163,74,0.4)] transition-all active:scale-95 shadow-[0_0_30px_rgba(22,163,74,0.3)] mb-8 animate-pulse">
             <Plus className="w-5 h-5" /> Start First Match
           </button>
+
+          {/* Watch a live match */}
+          <div className="w-full max-w-sm mb-12 bg-white border border-green-200 rounded-2xl p-5 shadow-sm">
+            <div className="text-xs font-black text-black uppercase tracking-widest mb-3 flex items-center gap-2">
+              <Eye className="w-4 h-4 text-sports-blue" /> Watch a Live Match
+            </div>
+            <div className="flex gap-2">
+              <input value={watchMatchId} onChange={e => setWatchMatchId(e.target.value)}
+                placeholder="Paste match ID..."
+                className="flex-1 px-3 py-2 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-xs outline-none focus:border-sports-green transition-all" />
+              <button onClick={() => watchLiveMatch(watchMatchId)}
+                className="px-4 py-2 bg-sports-blue text-white rounded-xl font-black text-xs hover:bg-sports-green transition-all">
+                Watch
+              </button>
+            </div>
+            {watchError && <p className="text-xs text-red-600 font-bold mt-2">{watchError}</p>}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-3xl">
             {[
               { icon: CircleDot, label: 'Match Logic', desc: 'Track ball-by-ball scoring and match flow' },
@@ -663,6 +1077,9 @@ export default function App() {
 
     return (
       <div className="space-y-8 pb-12">
+        {/* Resume Banner — always at top if match in progress */}
+        {hasActiveMatch && <ResumeBanner />}
+
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-sports-blue/10 via-sports-green/10 to-sports-blue/10 border border-green-200 p-8 md:p-12">
           <div className="relative z-10">
             <div className="flex items-center justify-between">
@@ -671,12 +1088,6 @@ export default function App() {
                 <p className="text-black text-sm font-medium">{totalMatches} matches • {totalRuns} total runs • {totalWickets} total wickets</p>
               </div>
               <div className="flex items-center gap-3">
-                {score.balls > 0 && (
-                  <button onClick={() => setCurrentView('live-scoring')}
-                    className="flex items-center gap-2 px-6 py-3 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-xs hover:bg-sports-blue transition-all active:scale-95 shadow-lg">
-                    <Play className="w-4 h-4" /> Continue Match
-                  </button>
-                )}
                 <button onClick={() => setCurrentView('match-setup')}
                   className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-sports-blue to-sports-green text-white rounded-xl font-black uppercase tracking-widest text-xs hover:shadow-[0_0_30px_rgba(22,163,74,0.4)] transition-all active:scale-95 shadow-lg">
                   <Plus className="w-4 h-4" /> New Match
@@ -684,38 +1095,77 @@ export default function App() {
               </div>
             </div>
           </div>
+          {/* Watch a live match */}
+          <div className="mt-4 flex gap-2 items-center">
+            <Eye className="w-4 h-4 text-sports-blue shrink-0" />
+            <input value={watchMatchId} onChange={e => setWatchMatchId(e.target.value)}
+              placeholder="Watch live match — paste match ID..."
+              className="flex-1 px-3 py-2 bg-white border-2 border-green-200 rounded-xl text-black font-bold text-xs outline-none focus:border-sports-green transition-all max-w-xs" />
+            <button onClick={() => watchLiveMatch(watchMatchId)}
+              className="px-4 py-2 bg-sports-blue text-white rounded-xl font-black text-xs hover:bg-sports-green transition-all">
+              Watch
+            </button>
+            {watchError && <span className="text-xs text-red-600 font-bold">{watchError}</span>}
+          </div>
         </div>
 
         <div>
           <h2 className="text-2xl font-black text-black tracking-tighter mb-4">Match Scores</h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {matchHistory.map((match) => (
-              <div key={match.id}>
-                <Card className="p-6 border border-green-300 hover:border-green-400 transition-all">
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="text-xs font-black text-black uppercase tracking-widest">{match.date}</span>
-                    <div className="w-2 h-2 rounded-full bg-sports-green" />
-                  </div>
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="text-center flex-1">
-                      <div className="text-3xl font-black text-black mb-1">{match.scoreA}</div>
-                      <div className="text-xs text-black font-bold">{match.teamA}</div>
+            {matchHistory.map((match, idx) => {
+              const aWon = match.scoreA > match.scoreB;
+              const bWon = match.scoreB > match.scoreA;
+              const tied = match.scoreA === match.scoreB;
+              const winner = tied ? 'Tied' : aWon ? match.teamA : match.teamB;
+              const margin = tied ? '' : aWon
+                ? `${match.scoreA - match.scoreB} runs`
+                : `${10 - match.wicketsB} wickets`;
+              return (
+                <motion.div key={match.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.05 }}>
+                  <Card className="p-5 border border-green-300 hover:border-green-400 transition-all">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[10px] font-black text-black uppercase tracking-widest">{match.date}</span>
+                      {!tied && (
+                        <span className="text-[10px] font-black text-white bg-sports-green px-2 py-0.5 rounded-full uppercase tracking-widest">
+                          {winner} won by {margin}
+                        </span>
+                      )}
+                      {tied && <span className="text-[10px] font-black text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full uppercase tracking-widest">Tied</span>}
                     </div>
-                    <div className="px-4 text-center">
-                      <div className="text-xs font-black text-black uppercase">vs</div>
+
+                    {/* Scores */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className={`text-center flex-1 p-3 rounded-xl ${aWon ? 'bg-green-100 border border-green-300' : 'bg-slate-50 border border-slate-200'}`}>
+                        <div className="text-xs font-black text-black uppercase tracking-widest mb-1 truncate">{match.teamA}</div>
+                        <div className="text-3xl font-black text-black leading-none">{match.scoreA}</div>
+                        <div className="text-xs font-bold text-black">/{match.wicketsA}</div>
+                      </div>
+                      <div className="px-3 text-center">
+                        <div className="text-xs font-black text-black uppercase">vs</div>
+                      </div>
+                      <div className={`text-center flex-1 p-3 rounded-xl ${bWon ? 'bg-green-100 border border-green-300' : 'bg-slate-50 border border-slate-200'}`}>
+                        <div className="text-xs font-black text-black uppercase tracking-widest mb-1 truncate">{match.teamB}</div>
+                        <div className="text-3xl font-black text-black leading-none">{match.scoreB}</div>
+                        <div className="text-xs font-bold text-black">/{match.wicketsB}</div>
+                      </div>
                     </div>
-                    <div className="text-center flex-1">
-                      <div className="text-3xl font-black text-black mb-1">{match.scoreB}</div>
-                      <div className="text-xs text-black font-bold">{match.teamB}</div>
+
+                    {/* MOM */}
+                    <div className="flex items-center gap-2 pt-3 border-t border-green-200">
+                      <div className="w-6 h-6 rounded-full bg-yellow-100 border border-yellow-300 flex items-center justify-center">
+                        <Trophy className="w-3 h-3 text-yellow-600" />
+                      </div>
+                      <span className="text-xs text-black font-bold">Man of the Match:</span>
+                      <span className="text-xs font-black text-sports-green">{match.mom || 'N/A'}</span>
                     </div>
-                  </div>
-                  <div className="pt-4 border-t border-green-200 flex items-center gap-2">
-                    <Trophy className="w-4 h-4 text-sports-green" />
-                    <span className="text-xs text-black">MOM: <span className="text-black font-bold">{match.mom || 'N/A'}</span></span>
-                  </div>
-                </Card>
-              </div>
-            ))}
+                  </Card>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
 
@@ -826,18 +1276,55 @@ export default function App() {
     const bowlingPlayers = bowlingTeam === 'A' ? matchConfig.playersA : matchConfig.playersB;
     const battingTeamName = battingTeam === 'A' ? (matchConfig.teamA || 'Team A') : (matchConfig.teamB || 'Team B');
     const bowlingTeamName = bowlingTeam === 'A' ? (matchConfig.teamA || 'Team A') : (matchConfig.teamB || 'Team B');
+    const isSecondInnings = score.innings === 2;
+    const target = isSecondInnings && score.firstInningsScore ? score.firstInningsScore.runs + 1 : null;
+
     return (
-      <div className="max-w-2xl mx-auto space-y-8 pb-12">
-        <div className="text-center space-y-3">
-          <h2 className="text-3xl font-black text-black tracking-tighter">Select Openers</h2>
-          <p className="text-black text-sm font-medium">{battingTeamName} is batting first</p>
+      <div className="max-w-2xl mx-auto space-y-6 pb-12">
+        {/* Header */}
+        <div className="text-center space-y-2">
+          {isSecondInnings ? (
+            <>
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-orange-100 border border-orange-300 rounded-full mb-2">
+                <span className="text-xs font-black text-orange-700 uppercase tracking-widest">2nd Innings</span>
+              </div>
+              <h2 className="text-3xl font-black text-black tracking-tighter">Select Openers</h2>
+              <p className="text-black text-sm font-medium">{battingTeamName} needs to chase</p>
+              {target && (
+                <div className="inline-flex items-center gap-3 mt-2 px-5 py-3 bg-gradient-to-r from-orange-50 to-yellow-50 border-2 border-orange-300 rounded-2xl">
+                  <div className="text-center">
+                    <div className="text-[10px] font-black text-orange-700 uppercase tracking-widest">Target</div>
+                    <div className="text-3xl font-black text-orange-700">{target}</div>
+                  </div>
+                  <div className="w-px h-10 bg-orange-200" />
+                  <div className="text-center">
+                    <div className="text-[10px] font-black text-black uppercase tracking-widest">1st Innings</div>
+                    <div className="text-xl font-black text-black">{score.firstInningsScore?.runs}/{score.firstInningsScore?.wickets}</div>
+                  </div>
+                  <div className="w-px h-10 bg-orange-200" />
+                  <div className="text-center">
+                    <div className="text-[10px] font-black text-black uppercase tracking-widest">Overs</div>
+                    <div className="text-xl font-black text-black">{matchConfig.overs}</div>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <h2 className="text-3xl font-black text-black tracking-tighter">Select Openers</h2>
+              <p className="text-black text-sm font-medium">{battingTeamName} is batting first</p>
+            </>
+          )}
         </div>
-        <Card className="p-6 space-y-6">
+
+        <Card className="p-6 space-y-5">
           <div className="space-y-4">
-            <label className="text-xs font-black text-black uppercase tracking-widest block">Opening Batsmen ({battingTeamName})</label>
+            <label className="text-xs font-black text-black uppercase tracking-widest block">
+              Opening Batsmen — <span className="text-sports-green">{battingTeamName}</span>
+            </label>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="text-[10px] font-black text-black uppercase tracking-widest mb-2 block">Striker</label>
+                <label className="text-[10px] font-black text-black uppercase tracking-widest mb-2 block">⚡ Striker</label>
                 <select value={batsmen.onStrike.name}
                   onChange={(e) => setBatsmen(prev => ({ ...prev, onStrike: { name: e.target.value, runs: 0, balls: 0 } }))}
                   className="w-full px-3 py-2.5 bg-white border-2 border-green-300 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green">
@@ -846,7 +1333,7 @@ export default function App() {
                 </select>
               </div>
               <div>
-                <label className="text-[10px] font-black text-black uppercase tracking-widest mb-2 block">Non-Striker</label>
+                <label className="text-[10px] font-black text-black uppercase tracking-widest mb-2 block">🏃 Non-Striker</label>
                 <select value={batsmen.nonStriker.name}
                   onChange={(e) => setBatsmen(prev => ({ ...prev, nonStriker: { name: e.target.value, runs: 0, balls: 0 } }))}
                   className="w-full px-3 py-2.5 bg-white border-2 border-green-300 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green">
@@ -856,8 +1343,11 @@ export default function App() {
               </div>
             </div>
           </div>
-          <div className="space-y-4">
-            <label className="text-xs font-black text-black uppercase tracking-widest block">Opening Bowler ({bowlingTeamName})</label>
+
+          <div className="space-y-3">
+            <label className="text-xs font-black text-black uppercase tracking-widest block">
+              Opening Bowler — <span className="text-sports-blue">{bowlingTeamName}</span>
+            </label>
             <select value={currentBowler.name}
               onChange={(e) => setCurrentBowler({ name: e.target.value, overs: 0, runs: 0, wickets: 0 })}
               className="w-full px-3 py-2.5 bg-white border-2 border-green-300 rounded-xl text-black font-bold text-sm outline-none focus:border-sports-green">
@@ -865,6 +1355,7 @@ export default function App() {
               {bowlingPlayers.filter(p => p).map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
+
           <button
             disabled={!batsmen.onStrike.name || !batsmen.nonStriker.name || !currentBowler.name}
             onClick={() => {
@@ -872,7 +1363,7 @@ export default function App() {
               setCurrentView('live-scoring');
             }}
             className="w-full py-4 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-sm hover:bg-sports-blue transition-all shadow-lg disabled:opacity-30 flex items-center justify-center gap-3">
-            Start Match <ArrowRight className="w-5 h-5" />
+            {isSecondInnings ? <>Start 2nd Innings <ArrowRight className="w-5 h-5" /></> : <>Start Match <ArrowRight className="w-5 h-5" /></>}
           </button>
         </Card>
       </div>
@@ -1191,7 +1682,7 @@ export default function App() {
             </div>
             <button
               disabled={!matchConfig.toss.winner || !matchConfig.toss.choice}
-              onClick={() => {
+              onClick={async () => {
                 const battingTeam = (matchConfig.toss.winner === 'Team A' && matchConfig.toss.choice === 'Bat') || (matchConfig.toss.winner === 'Team B' && matchConfig.toss.choice === 'Bowl') ? 'A' : 'B';
                 const bowlingTeam = battingTeam === 'A' ? 'B' : 'A';
                 const finalTeamA = matchConfig.teamA || 'Team A';
@@ -1206,6 +1697,26 @@ export default function App() {
                 setCurrentBowler({ name: bowlingPlayers[0] || '', overs: 0, runs: 0, wickets: 0 });
                 setMatchHistoryStack([]);
                 setCommentary([]);
+
+                // Create match record in Supabase
+                const { data: newMatch } = await supabase.from('matches').insert({
+                  created_by: user.id,
+                  team_a: finalTeamA,
+                  team_b: finalTeamB,
+                  color_a: matchConfig.colorA,
+                  color_b: matchConfig.colorB,
+                  overs: matchConfig.overs,
+                  num_players: matchConfig.numPlayers,
+                  players_a: finalPlayersA,
+                  players_b: finalPlayersB,
+                  toss: matchConfig.toss,
+                  status: 'setup',
+                }).select('id').single();
+                if (newMatch?.id) {
+                  setActiveMatchId(newMatch.id);
+                  setIsMatchOwner(true);
+                }
+
                 setCurrentView('openers-selection');
               }}
               className="mt-8 w-full py-4 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-sm hover:bg-sports-blue transition-all shadow-lg disabled:opacity-30 flex items-center justify-center gap-3">
@@ -1228,6 +1739,12 @@ export default function App() {
 
     return (
       <div className="max-w-5xl mx-auto space-y-3 pb-6">
+        {/* View-only banner for non-owners */}
+        {!isMatchOwner && (
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-300 rounded-xl text-xs font-black text-blue-700 uppercase tracking-widest">
+            <Eye className="w-4 h-4" strokeWidth={3} /> Spectator Mode — you can watch but not score this match
+          </div>
+        )}
         <AnimatePresence>
           {scorePopAnimation && (
             <motion.div initial={{ opacity: 0, y: 0, scale: 0.5 }} animate={{ opacity: 1, y: -80, scale: 1.5 }} exit={{ opacity: 0, scale: 0 }} transition={{ duration: 0.5 }}
@@ -1248,7 +1765,14 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-black">{matchConfig.overs} ov match</span>
-            <button onClick={undoLastAction} disabled={matchHistoryStack.length === 0}
+            {isMatchOwner && activeMatchId && (
+              <button onClick={() => { navigator.clipboard.writeText(activeMatchId); }}
+                title="Copy match ID to share with spectators"
+                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-lg text-xs font-black text-blue-700 transition-all">
+                <Eye className="w-3 h-3" strokeWidth={3} /> Share
+              </button>
+            )}
+            <button onClick={undoLastAction} disabled={matchHistoryStack.length === 0 || !isMatchOwner}
               className="flex items-center gap-1 px-3 py-1.5 bg-green-100 hover:bg-green-200 border border-green-300 rounded-lg text-xs font-black text-black transition-all disabled:opacity-40">
               <Undo2 className="w-3 h-3" strokeWidth={3} /> Undo
             </button>
@@ -1298,7 +1822,7 @@ export default function App() {
           <div className="text-[10px] font-black text-black uppercase tracking-widest mb-2">Score</div>
           <div className="grid grid-cols-9 gap-1.5">
             {[0, 1, 2, 3, 4, 6, 'Wide', 'No-Ball', 'WICKET'].map((action) => (
-              <button key={action} onClick={() => handleScoreAction(action)} disabled={isInningsOver}
+              <button key={action} onClick={() => handleScoreAction(action)} disabled={isInningsOver || !isMatchOwner}
                 className={`py-3 rounded-lg text-xs font-black transition-all active:scale-95 disabled:opacity-30 uppercase tracking-wide border-2
                   ${action === 0 ? 'bg-slate-100 border-slate-300 text-black hover:bg-slate-200' :
                     action === 1 ? 'bg-green-100 border-green-400 text-green-900 hover:bg-green-200' :
@@ -1578,7 +2102,19 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <div className="p-3 border-t border-green-200">
+          <div className="p-3 border-t border-green-200 space-y-1">
+            {/* User info */}
+            {!isSidebarCollapsed && (
+              <div className="px-3 py-2 bg-green-50 rounded-xl border border-green-200 mb-2">
+                <div className="text-[10px] font-black text-black uppercase tracking-widest">Signed in as</div>
+                <div className="text-xs font-black text-sports-green truncate">{user.displayName}</div>
+              </div>
+            )}
+            <button onClick={onSignOut}
+              className="w-full flex items-center justify-center gap-2 p-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg text-red-700 transition-colors font-bold text-xs">
+              <LogOut className="w-3.5 h-3.5" strokeWidth={3} />
+              {!isSidebarCollapsed && <span className="font-black uppercase tracking-widest text-[10px]">Sign Out</span>}
+            </button>
             <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="w-full flex items-center justify-center p-2 bg-green-100 hover:bg-green-200 rounded-lg text-black transition-colors">
               <Menu className="w-4 h-4" strokeWidth={3} />
@@ -1667,7 +2203,7 @@ export default function App() {
               </div>
               <button onClick={startSecondInnings}
                 className="w-full py-4 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-sm hover:bg-sports-blue transition-all shadow-lg flex items-center justify-center gap-3">
-                Start Second Innings <ArrowRight className="w-5 h-5" />
+                Start 2nd Innings <ArrowRight className="w-5 h-5" />
               </button>
             </Card>
           </motion.div>
@@ -1677,21 +2213,80 @@ export default function App() {
       <AnimatePresence>
         {showMatchOverModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[110] flex items-center justify-center p-6">
-            <Card className="max-w-md w-full p-8 space-y-6 border-green-300 shadow-2xl">
-              <div className="text-center space-y-4">
-                <div className="w-16 h-16 rounded-2xl bg-sports-green/20 flex items-center justify-center mx-auto border border-green-300"><Trophy className="w-8 h-8 text-sports-green" /></div>
-                <h3 className="text-2xl font-black text-black tracking-tight">Match Over!</h3>
-                <div className="p-4 bg-green-50 rounded-2xl border border-green-200">
-                  <div className="text-black text-xs font-black uppercase tracking-widest">Final Score</div>
-                  <div className="text-3xl font-black text-black">{score.runs}/{score.wickets}</div>
+            className="fixed inset-0 bg-black/85 backdrop-blur-xl z-[110] flex items-center justify-center p-6">
+            <motion.div
+              initial={{ scale: 0.7, opacity: 0, y: 40 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 200, damping: 18 }}
+              className="max-w-md w-full"
+            >
+              {/* Confetti-style top glow */}
+              <div className="relative">
+                <div className="absolute -inset-4 bg-gradient-to-r from-yellow-400/30 via-sports-green/30 to-yellow-400/30 blur-2xl rounded-3xl" />
+                <div className="relative bg-white rounded-3xl overflow-hidden border-2 border-yellow-300 shadow-[0_0_60px_rgba(234,179,8,0.3)]">
+
+                  {/* Gold header banner */}
+                  <div className="bg-gradient-to-r from-yellow-400 via-yellow-300 to-yellow-400 px-6 py-4 text-center">
+                    <motion.div
+                      animate={{ scale: [1, 1.1, 1] }}
+                      transition={{ repeat: Infinity, duration: 1.5 }}
+                      className="text-2xl mb-1">🏆</motion.div>
+                    <div className="text-sm font-black text-yellow-900 uppercase tracking-[0.3em]">Match Over</div>
+                  </div>
+
+                  <div className="p-6 space-y-5">
+                    {/* Final scores */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { team: matchConfig.teamA || 'Team A', runs: score.battingTeam === 'A' ? score.runs : (score.firstInningsScore?.runs ?? 0), wickets: score.battingTeam === 'A' ? score.wickets : (score.firstInningsScore?.wickets ?? 0) },
+                        { team: matchConfig.teamB || 'Team B', runs: score.battingTeam === 'B' ? score.runs : (score.firstInningsScore?.runs ?? 0), wickets: score.battingTeam === 'B' ? score.wickets : (score.firstInningsScore?.wickets ?? 0) },
+                      ].map((t) => (
+                        <div key={t.team} className="bg-green-50 border border-green-200 rounded-2xl p-4 text-center">
+                          <div className="text-xs font-black text-black uppercase tracking-widest mb-1 truncate">{t.team}</div>
+                          <div className="text-4xl font-black text-black leading-none">{t.runs}</div>
+                          <div className="text-sm font-bold text-black">/{t.wickets}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* MOM animated card */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.4 }}
+                      className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-yellow-50 to-orange-50 border-2 border-yellow-300 p-5 text-center"
+                    >
+                      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-yellow-400 via-orange-400 to-yellow-400" />
+                      <motion.div
+                        animate={{ rotate: [0, -5, 5, -5, 0] }}
+                        transition={{ delay: 0.6, duration: 0.5 }}
+                        className="text-3xl mb-2">⭐</motion.div>
+                      <div className="text-[10px] font-black text-yellow-700 uppercase tracking-[0.3em] mb-1">Man of the Match</div>
+                      <motion.div
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        transition={{ delay: 0.5, type: 'spring', stiffness: 300 }}
+                        className="text-2xl font-black text-black tracking-tight"
+                      >
+                        {batsmen.onStrike.runs >= batsmen.nonStriker.runs ? batsmen.onStrike.name : batsmen.nonStriker.name}
+                      </motion.div>
+                      <div className="text-xs font-bold text-yellow-700 mt-1">
+                        {batsmen.onStrike.runs >= batsmen.nonStriker.runs
+                          ? `${batsmen.onStrike.runs} runs (${batsmen.onStrike.balls} balls)`
+                          : `${batsmen.nonStriker.runs} runs (${batsmen.nonStriker.balls} balls)`}
+                      </div>
+                    </motion.div>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                      onClick={finishMatch}
+                      className="w-full py-4 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-sm hover:bg-sports-blue transition-all shadow-lg flex items-center justify-center gap-3">
+                      Save & Finish <ArrowRight className="w-5 h-5" />
+                    </motion.button>
+                  </div>
                 </div>
               </div>
-              <button onClick={finishMatch}
-                className="w-full py-4 bg-sports-green text-white rounded-xl font-black uppercase tracking-widest text-sm hover:bg-sports-blue transition-all shadow-lg flex items-center justify-center gap-3">
-                Finish Match <ArrowRight className="w-5 h-5" />
-              </button>
-            </Card>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
