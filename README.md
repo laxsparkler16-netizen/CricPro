@@ -25,9 +25,10 @@ CricPro is a full-featured cricket scoring app for local matches. Sign in, set u
 
 - **Auth** — email/password sign up and sign in via Supabase Auth, with per-user isolated data
 - **Match Setup** — team names, overs (5/10/20/50/custom), player count, team colors, and toss (manual or AI coin flip)
-- **Player Management** — manually assign players to each team, or enter a full pool and shuffle into balanced teams
+- **Player Management** — manually assign players to each team, or enter a full pool and shuffle into balanced teams using historical stats
 - **Live Scoring** — ball-by-ball buttons for 0–6 runs, Wide, No-Ball, and Wicket with real-time striker/non-striker/bowler tracking
-- **Wicket Handling** — select dismissal type (Bowled, Caught, LBW, Run Out), pick fielder for Caught/Run Out, then select next batsman and bowler
+- **Wicket Handling** — select dismissal type (Bowled, Caught, LBW, Run Out), pick fielder for Caught/Run Out, then select the next batsman from only the remaining (not yet dismissed) players
+- **Bowler Restriction** — the bowler who bowled the previous over cannot bowl the next over, enforced in the bowler selection modal
 - **Strike Rotation** — automatic strike rotation on odd runs and end of over
 - **Undo** — undo any last action including wickets
 - **Second Innings** — full two-innings support with target, required runs, and balls remaining
@@ -68,10 +69,10 @@ npm install
 Run the SQL files in order in your Supabase SQL Editor:
 
 ```
-supabase/01_schema.sql   — tables, indexes, triggers
-supabase/02_rls.sql      — row-level security policies
-supabase/03_realtime.sql — enable realtime on matches table
-supabase/04_functions.sql — upsert_player_stat RPC
+supabase/01_schema.sql        — tables, indexes, triggers
+supabase/02_rls.sql           — row-level security policies
+supabase/03_realtime.sql      — enable realtime on matches table
+supabase/04_functions.sql     — upsert_player_stat RPC
 supabase/05_add_share_code.sql — migration (skip if running 01 fresh)
 ```
 
@@ -115,11 +116,11 @@ cricpro/
 │   ├── main.tsx          # React entry point
 │   └── vite-env.d.ts     # Vite env type declarations
 ├── supabase/
-│   ├── 01_schema.sql     # Tables: profiles, matches, player_stats, commentary
-│   ├── 02_rls.sql        # Row-level security
-│   ├── 03_realtime.sql   # Realtime publication
-│   ├── 04_functions.sql  # upsert_player_stat RPC
-│   └── 05_add_share_code.sql # share_code migration
+│   ├── 01_schema.sql          # Tables: profiles, matches, player_stats, commentary
+│   ├── 02_rls.sql             # Row-level security
+│   ├── 03_realtime.sql        # Realtime publication
+│   ├── 04_functions.sql       # upsert_player_stat RPC
+│   └── 05_add_share_code.sql  # share_code migration
 ├── index.html
 ├── .env.example
 └── vite.config.ts
